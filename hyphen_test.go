@@ -1,7 +1,8 @@
 package hyphenate
 
 import (
-	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/npillmayer/schuko/tracing/gotestingadapter"
@@ -9,9 +10,21 @@ import (
 
 var germanDict, usDict *Dictionary
 
-	//germanDict = LoadPatterns(gconf.GetString("etc-dir") + "/pattern/hyph-de-1996.tex")
-	//usDict = LoadPatterns(gconf.GetString("etc-dir") + "/pattern/hyph-en-us.tex")
-	//usDict = LoadPatterns("/Users/npi/prg/go/gotype/etc/hyph-en-us.tex")
+//germanDict = LoadPatterns(gconf.GetString("etc-dir") + "/pattern/hyph-de-1996.tex")
+//usDict = LoadPatterns(gconf.GetString("etc-dir") + "/pattern/hyph-en-us.tex")
+//usDict = LoadPatterns("/Users/npi/prg/go/gotype/etc/hyph-en-us.tex")
+
+func init() {
+	germanDict = LoadPatterns("de-test", strings.NewReader(`\hyphenation{
+Aus-nah-me
+}`))
+	f, err := os.Open("testdata/hyph-en-us.tex")
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	usDict = LoadPatterns("hyph-en-us.tex", f)
+}
 
 func TestDEPatterns(t *testing.T) {
 	teardown := gotestingadapter.QuickConfig(t, "hyphenate")

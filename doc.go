@@ -17,13 +17,13 @@ application.
 
 Further Reading
 
-  https://www.microsoft.com/en-us/Typography/OpenTypeSpecification.aspx
-  https://nedbatchelder.com/code/modules/hyphenate.html   (Python implementation)
-  http://www.mnn.ch/hyph/hyphenation2.html  / https://github.com/mnater/hyphenator
+	https://www.microsoft.com/en-us/Typography/OpenTypeSpecification.aspx
+	https://nedbatchelder.com/code/modules/hyphenate.html   (Python implementation)
+	http://www.mnn.ch/hyph/hyphenation2.html  / https://github.com/mnater/hyphenator
 
 ----------------------------------------------------------------------
 
-BSD License
+# BSD License
 
 Copyright (c) Norbert Pillmayer <norbert@pillmayer@com>
 
@@ -34,10 +34,16 @@ License information is available in the LICENSE file.
 package hyphenate
 
 import (
-		"github.com/npillmayer/schuko/tracing"
+	"github.com/npillmayer/schuko/tracing"
 )
 
 // tracer writes to trace with key 'hyphenate'
 func tracer() tracing.Trace {
 	return tracing.Select("hyphenate")
+}
+
+func assert(condition bool, msg string) {
+	if !condition {
+		panic(msg)
+	}
 }
