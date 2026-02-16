@@ -7,8 +7,7 @@ https://cecs.wright.edu/people/faculty/pmateti/Courses/7140/PDF/cwp-knuth-cacm-1
 The trie is suitable for write-once-read-many-times situations. The idea is to
 spend some effort to create a compact but efficient dictionary for categorical data.
 
-
-License
+# License
 
 Governed by a 3-Clause BSD license. License file may be found in the root
 folder of this module.
@@ -23,5 +22,5 @@ import (
 
 // tracer traces with key 'uax.bidi'.
 func tracer() tracing.Trace {
-	return tracing.Select("uax.bid")
+	return tracing.Select("hyphenate.trie")
 }
