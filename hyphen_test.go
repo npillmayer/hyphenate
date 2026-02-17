@@ -37,7 +37,7 @@ func (r *sliceExceptionReader) Next() (string, []int, error) {
 }
 
 func TestPatternReaderAPI(t *testing.T) {
-	dict, err := LoadPatternReader("stream-patterns", &slicePatternReader{
+	dict, err := LoadPatterns("stream-patterns", &slicePatternReader{
 		entries: []Pattern{{
 			Sequence: []rune("für"),
 			Weights:  []int{0, 0, 1},
@@ -52,7 +52,7 @@ func TestPatternReaderAPI(t *testing.T) {
 }
 
 func TestPatternListAPI(t *testing.T) {
-	dict, err := LoadPatternReader("list-patterns", &slicePatternReader{
+	dict, err := LoadPatterns("list-patterns", &slicePatternReader{
 		entries: []Pattern{{
 			Sequence: []rune("für"),
 			Weights:  []int{0, 0, 1},
@@ -67,11 +67,11 @@ func TestPatternListAPI(t *testing.T) {
 }
 
 func TestExceptionReaderAPI(t *testing.T) {
-	dict, err := LoadPatternReader("stream-exceptions", &slicePatternReader{})
+	dict, err := LoadPatterns("stream-exceptions", &slicePatternReader{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	dict.LoadExceptionReader(&sliceExceptionReader{
+	dict.LoadExceptions(&sliceExceptionReader{
 		entries: []struct {
 			word      string
 			positions []int
@@ -88,7 +88,7 @@ func TestExceptionReaderAPI(t *testing.T) {
 }
 
 func TestPatternTrieStats(t *testing.T) {
-	dict, err := LoadPatternReader("stats", &slicePatternReader{
+	dict, err := LoadPatterns("stats", &slicePatternReader{
 		entries: []Pattern{
 			{Sequence: []rune("ab"), Weights: []int{0, 1}},
 			{Sequence: []rune("abc"), Weights: []int{0, 1, 0}},

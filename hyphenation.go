@@ -50,11 +50,11 @@ func (dict *Dictionary) PatternTrieStats() (backend string, usedSlots, totalSlot
 	return stats.Backend, stats.UsedSlots, stats.TotalSlots, stats.MaxStateID, stats.FillRatio()
 }
 
-// LoadPatternReader compiles patterns from a streaming, format-agnostic source.
+// LoadPatterns compiles patterns from a streaming, format-agnostic source.
 //
 // File format parsing is intentionally outside the base package. Use adapters
 // like package texpatterns to parse concrete formats and feed this API.
-func LoadPatternReader(name string, reader PatternReader) (*Dictionary, error) {
+func LoadPatterns(name string, reader PatternReader) (*Dictionary, error) {
 	trie := mustNewDATBackend()
 	type pendingPayload struct {
 		pos    int
@@ -109,18 +109,20 @@ func LoadPatternReader(name string, reader PatternReader) (*Dictionary, error) {
 	return dict, nil
 }
 
-// LoadExceptionReader loads exception entries from a streaming source.
-func (dict *Dictionary) LoadExceptionReader(reader ExceptionReader) {
+// LoadExceptions loads exception entries from a streaming source.
+func (dict *Dictionary) LoadExceptions(reader ExceptionReader) (err error) {
 	for {
-		word, positions, err := reader.Next()
+		var word string
+		var positions []int
+		word, positions, err = reader.Next()
 		if err == io.EOF {
-			return
-		}
-		if err != nil {
-			panic(fmt.Sprintf("error scanning exception source: %v", err))
+			return nil
+		} else if err != nil {
+			break
 		}
 		dict.AddException(word, positions)
 	}
+	return err
 }
 
 // LoadExceptionList loads explicit exception entries from an in-memory map.

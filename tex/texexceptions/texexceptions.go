@@ -2,6 +2,8 @@ package texexceptions
 
 import (
 	"bufio"
+	"errors"
+	"fmt"
 	"io"
 	"strings"
 
@@ -17,7 +19,7 @@ type Reader struct {
 // LoadExceptions parses TeX exception data from reader and adds all
 // \hyphenation{...} entries to this dictionary.
 func LoadExceptions(dict *hyphenate.Dictionary, reader io.Reader) {
-	dict.LoadExceptionReader(NewReader(reader))
+	dict.LoadExceptions(NewReader(reader))
 }
 
 func NewReader(reader io.Reader) *Reader {
@@ -29,16 +31,27 @@ func NewReader(reader io.Reader) *Reader {
 // Next returns the next exception as (word, positions).
 // It returns io.EOF when exhausted.
 func (r *Reader) Next() (string, []int, error) {
+	fmt.Println("HELLO")
 	for r.scanner.Scan() {
 		line := r.scanner.Text()
-		if !r.inBlock {
-			if strings.HasPrefix(line, "\\hyphenation{") {
-				r.inBlock = true
-			}
+		fmt.Println(line)
+		if strings.HasPrefix(line, "%") || line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "\\patterns{") {
+			skipTeXBlock(r.scanner)
+			continue
+		}
+		if strings.HasPrefix(line, "\\hyphenation{") {
+			r.inBlock = true
+			fmt.Printf("======== in block ============")
 			continue
 		}
 		if strings.HasPrefix(line, "}") {
-			r.inBlock = false
+			if r.inBlock {
+				fmt.Printf("======== eof block ===========")
+				return "", nil, io.EOF
+			}
 			continue
 		}
 		positions := make([]int, 0, len(line))
@@ -59,5 +72,17 @@ func (r *Reader) Next() (string, []int, error) {
 	if err := r.scanner.Err(); err != nil {
 		return "", nil, err
 	}
+	if r.inBlock {
+		return "", nil, errors.New("unexpected end of file (unclosed \\hyphenation block)")
+	}
 	return "", nil, io.EOF
+}
+
+func skipTeXBlock(scanner *bufio.Scanner) {
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.HasPrefix(line, "}") {
+			return
+		}
+	}
 }

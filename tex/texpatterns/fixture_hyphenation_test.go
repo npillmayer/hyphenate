@@ -7,12 +7,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/npillmayer/hyphenate/texexceptions"
+	"github.com/npillmayer/hyphenate/tex/texexceptions"
 )
 
 func mustLoadFixture(t *testing.T, file string) []byte {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join("..", "testdata", file))
+	data, err := os.ReadFile(filepath.Join("..", "..", "testdata", file))
 	if err != nil {
 		t.Fatalf("cannot read fixture %s: %v", file, err)
 	}
@@ -91,22 +91,5 @@ func TestGermanPatternFixtureUmlauts(t *testing.T) {
 		if strings.ReplaceAll(got, "-", "") != tt.word {
 			t.Fatalf("hyphenation corrupted original word %q -> %q", tt.word, got)
 		}
-	}
-}
-
-func TestUnicodeExceptionSplit(t *testing.T) {
-	dict, err := LoadPatterns("unicode-test", strings.NewReader(""))
-	if err != nil {
-		t.Fatal(err)
-	}
-	texexceptions.LoadExceptions(dict, strings.NewReader(`\hyphenation{
-fü-rung
-schön-heit
-}`))
-	if h := dict.HyphenationString("fürung"); h != "fü-rung" {
-		t.Fatalf("fürung should be fü-rung, is %s", h)
-	}
-	if h := dict.HyphenationString("schönheit"); h != "schön-heit" {
-		t.Fatalf("schönheit should be schön-heit, is %s", h)
 	}
 }

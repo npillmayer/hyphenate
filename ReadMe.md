@@ -34,11 +34,11 @@ Streaming interface for exception sources:
 
 - `Next() (word string, positions []int, err error)`
 
-### `func LoadPatternReader(name string, reader PatternReader) (*Dictionary, error)`
+### `func LoadPatterns(name string, reader PatternReader) (*Dictionary, error)`
 
 Compiles patterns from a streaming reader into a dictionary.
 
-### `func (dict *Dictionary) LoadExceptionReader(reader ExceptionReader)`
+### `func (dict *Dictionary) LoadExceptions(reader ExceptionReader) error`
 
 Loads exceptions from a streaming reader.
 
@@ -58,12 +58,13 @@ Returns `word` split at legal hyphenation positions.
 
 Returns `word` with `-` inserted at legal hyphenation positions.
 
-## TeX Adapters
+## TeX Sub-Packages
 
 TeX parsing is intentionally outside the base package:
 
-- patterns: `github.com/npillmayer/hyphenate/texpatterns`
-- exceptions: `github.com/npillmayer/hyphenate/texexceptions`
+- convenience API: `github.com/npillmayer/hyphenate/tex`
+- patterns parser: `github.com/npillmayer/hyphenate/tex/texpatterns`
+- exceptions parser: `github.com/npillmayer/hyphenate/tex/texexceptions`
 
 Use these adapters when loading TeX `\patterns{...}` and `\hyphenation{...}`
 files.
@@ -87,7 +88,7 @@ func (emptyPatterns) Next() ([]rune, []int, error) {
 }
 
 func main() {
-	dict, err := hyphenate.LoadPatternReader("empty", emptyPatterns{})
+	dict, err := hyphenate.LoadPatterns("empty", emptyPatterns{})
 	if err != nil {
 		panic(err)
 	}
@@ -102,24 +103,23 @@ func main() {
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 
-	"github.com/npillmayer/hyphenate/texexceptions"
-	"github.com/npillmayer/hyphenate/texpatterns"
+	"github.com/npillmayer/hyphenate/tex"
 )
 
 func main() {
-	data, err := os.ReadFile("testdata/hyph-en-us.tex")
+	f, err := os.Open("testdata/hyph-en-us.tex")
 	if err != nil {
 		panic(err)
 	}
-	dict, err := texpatterns.LoadPatterns("hyph-en-us.tex", bytes.NewReader(data))
+	defer f.Close()
+
+	dict, err := tex.LoadDictionary("hyph-en-us.tex", f)
 	if err != nil {
 		panic(err)
 	}
-	texexceptions.LoadExceptions(dict, bytes.NewReader(data))
 
 	fmt.Println(dict.HyphenationString("algorithm")) // al-go-rithm
 }

@@ -2,6 +2,7 @@ package texpatterns
 
 import (
 	"bufio"
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -44,7 +45,7 @@ type PatternReader struct {
 // Exceptions from \hyphenation{...} are intentionally not loaded here.
 func LoadPatterns(name string, reader io.Reader) (*hyphenate.Dictionary, error) {
 	r := NewPatternReader(reader)
-	return hyphenate.LoadPatternReader(name, r)
+	return hyphenate.LoadPatterns(name, r)
 }
 
 func NewPatternReader(reader io.Reader) *PatternReader {
@@ -63,8 +64,14 @@ func (r *PatternReader) Identifier() string {
 // It returns io.EOF when exhausted.
 // The returned slices are reused by subsequent calls.
 func (r *PatternReader) Next() ([]rune, []int, error) {
+	var err error
+	inPatterns := false
 	for r.scanner.Scan() {
 		line := r.scanner.Text()
+		if strings.HasPrefix(line, "%     message: ") {
+			r.identifier = line[15:]
+			continue
+		}
 		if strings.HasPrefix(line, "\\message{") {
 			r.identifier = line[9 : len(line)-1]
 			continue
@@ -73,8 +80,17 @@ func (r *PatternReader) Next() ([]rune, []int, error) {
 			skipTeXBlock(r.scanner)
 			continue
 		}
-		if strings.HasPrefix(line, "%") || strings.HasPrefix(line, "\\") ||
-			line == "" || strings.HasPrefix(line, "}") {
+		if strings.HasPrefix(line, "%") || line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "\\patterns{") {
+			inPatterns = true
+			continue
+		}
+		if strings.HasPrefix(line, "}") {
+			if inPatterns { // closing of patterns block
+				return nil, nil, io.EOF // do not read further
+			}
 			continue
 		}
 		r.decodePatternLine(line)
@@ -83,8 +99,11 @@ func (r *PatternReader) Next() ([]rune, []int, error) {
 		}
 		return r.sequence, r.weights, nil
 	}
-	if err := r.scanner.Err(); err != nil {
+	if err = r.scanner.Err(); err != nil {
 		return nil, nil, err
+	}
+	if inPatterns {
+		err = errors.New("unexpected end of file (unclosed \\patterns block)")
 	}
 	return nil, nil, io.EOF
 }
