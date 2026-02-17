@@ -8,7 +8,7 @@ Import path:
 
 ## API
 
-### `func LoadDictionary(name string, reader io.Reader) (*hyphenate.Dictionary, error)`
+- `func LoadDictionary(name string, reader io.Reader) (*hyphenate.Dictionary, error)`
 
 Loads both TeX patterns (`\patterns{...}`) and TeX exceptions
 (`\hyphenation{...}`) from one source.
@@ -20,4 +20,3 @@ Loads both TeX patterns (`\patterns{...}`) and TeX exceptions
 
 Use those sub-packages directly when you need separate control over pattern and
 exception loading phases.
-
