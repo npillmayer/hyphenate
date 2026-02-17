@@ -13,54 +13,62 @@ This package is intended for:
 - computing hyphenation opportunities in words
 - keeping runtime memory compact for read-many workloads
 
-## Base Package API (`github.com/npillmayer/hyphenate`)
+## Base Package API
 
-### `type Pattern`
+A `hyphenate.Dictionary` lets you find hyphenation opportunities in words.
 
-Format-agnostic pattern entry:
+```go
+	hyphenated := dictEN.HyphenationString("computer"))
+	fmt.Println("computer => %s", hyphenated)
+	segments := dictDE.Hyphenate("Fürsorge") // German
+	fmt.Println("Fürsorge => %v", segments)
+```
 
-- `Sequence []rune`
-- `Weights []int`
+will result in
 
-### `type PatternReader`
+```shell
+% computer => com-put-er
+  Fürsorge => [ "Für", "sor", "ge" ].
+```
 
-Streaming interface for pattern sources:
+- Pattern matching is Unicode-aware for BMP characters.
+- Exceptions are applied before pattern-based hyphenation (see below).
 
-- `Next() (sequence []rune, weights []int, err error)`
 
-### `type ExceptionReader`
+### Loading Hyphenation Patterns
 
-Streaming interface for exception sources:
+Before a dictionary can be used, it must be initialized with hyphenation patterns.
+Clients load hyphenation patterns for each language they want to support. Every
+dictionary is associated with exactly one language.
+A dictionary loads hyphenation patterns from a source, usually a pattern-file.
 
-- `Next() (word string, positions []int, err error)`
+```go
+  (*Dictionary).LoadPatterns(name string, reader PatternSource) error
+```
 
-### `func LoadPatterns(name string, reader PatternReader) (*Dictionary, error)`
+#### Type `Pattern`, `PatternSource`
 
-Compiles patterns from a streaming reader into a dictionary.
+`Pattern`s are format-agnostic hyphenation pattern entries.
+A `PatternReader` is a streaming interface for pattern sources.
 
-### `func (dict *Dictionary) LoadExceptions(reader ExceptionReader) error`
+### Loading Hyphenation Exceptions
 
-Loads exceptions from a streaming reader.
+Patterns will ususally only get you so far. Exceptions are needed to handle
+special cases like "ta-ble" or "co-op-eration".
 
-### `func (dict *Dictionary) LoadExceptionList(exceptions map[string][]int)`
+#### Type `ExceptionsSource`
 
-Loads exceptions from an in-memory map.
+An exception-source is a streaming interface for reading hyphenation-exceptions.
 
-### `func (dict *Dictionary) AddException(word string, positions []int)`
-
-Adds one explicit exception.
-
-### `func (dict *Dictionary) Hyphenate(word string) []string`
-
-Returns `word` split at legal hyphenation positions.
-
-### `func (dict *Dictionary) HyphenationString(word string) string`
-
-Returns `word` with `-` inserted at legal hyphenation positions.
+```go
+  (*Dictionary).LoadExceptions(reader ExceptionReader) error
+```
 
 ## TeX Sub-Packages
 
-TeX parsing is intentionally outside the base package:
+The TeX communitiy provides pattern files for a lot of languages
+[on GitHub](https://github.com/hyphenation/tex-hyphen/tree/master/hyph-utf8/tex/generic/hyph-utf8/patt).
+Please check the license before using them (most should be compatible with the MIT license).
 
 - convenience API: `github.com/npillmayer/hyphenate/tex`
 - patterns parser: `github.com/npillmayer/hyphenate/tex/texpatterns`
@@ -69,63 +77,19 @@ TeX parsing is intentionally outside the base package:
 Use these adapters when loading TeX `\patterns{...}` and `\hyphenation{...}`
 files.
 
-## Example: Base API (Format-Agnostic)
+## Example: TeX Pattern-File Loading
 
 ```go
-package main
+import "github.com/npillmayer/hyphenate/tex"
 
-import (
-	"fmt"
-	"io"
+// hyph-en-us.tex contains patterns and exceptions for US-English
+f, _ := os.Open("/path/to/patterns/hyph-en-us.tex")
+defer f.Close()
 
-	"github.com/npillmayer/hyphenate"
-)
-
-type emptyPatterns struct{}
-
-func (emptyPatterns) Next() ([]rune, []int, error) {
-	return nil, nil, io.EOF
+dictEN, err := tex.LoadDictionary("en-US", f)
+if err != nil {
+	panic(err)
 }
 
-func main() {
-	dict, err := hyphenate.LoadPatterns("empty", emptyPatterns{})
-	if err != nil {
-		panic(err)
-	}
-	dict.AddException("table", []int{0, 0, 1, 0, 0})
-	fmt.Println(dict.HyphenationString("table")) // ta-ble
-}
+fmt.Println(dictEN.HyphenationString("algorithm")) // al-go-rithm
 ```
-
-## Example: TeX File Loading
-
-```go
-package main
-
-import (
-	"fmt"
-	"os"
-
-	"github.com/npillmayer/hyphenate/tex"
-)
-
-func main() {
-	f, err := os.Open("testdata/hyph-en-us.tex")
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-
-	dict, err := tex.LoadDictionary("hyph-en-us.tex", f)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println(dict.HyphenationString("algorithm")) // al-go-rithm
-}
-```
-
-## Notes
-
-- Pattern matching is Unicode-aware for BMP characters.
-- Exceptions are applied before pattern-based hyphenation.
