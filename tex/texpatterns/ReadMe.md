@@ -9,12 +9,12 @@ Import path:
 
 ## API
 
-### `func LoadPatterns(name string, reader io.Reader) (*hyphenate.Dictionary, error)`
+- `func LoadPatterns(name string, reader io.Reader) (*hyphenate.Dictionary, error)`
 
 Parses `\patterns{...}` data and builds a dictionary from patterns.
 It does not load TeX exceptions.
 
-### `func NewPatternReader(reader io.Reader) *PatternReader`
+- `func NewPatternReader(reader io.Reader) *PatternReader`
 
 Creates a streaming parser implementing the base package `PatternReader`
 interface.
@@ -30,4 +30,3 @@ Typical split usage:
 
 1. load patterns with `texpatterns.LoadPatterns`
 2. then load exceptions with `texexceptions.LoadExceptions`
-

@@ -9,11 +9,11 @@ Import path:
 
 ## API
 
-### `func LoadExceptions(dict *hyphenate.Dictionary, reader io.Reader)`
+- `func LoadExceptions(dict *hyphenate.Dictionary, reader io.Reader)`
 
 Parses exceptions from TeX input and adds them to `dict`.
 
-### `func NewReader(reader io.Reader) *Reader`
+- `func NewReader(reader io.Reader) *Reader`
 
 Creates a streaming parser implementing the base package `ExceptionReader`
 interface.
@@ -29,4 +29,3 @@ Typical split usage:
 
 1. load patterns with `texpatterns.LoadPatterns`
 2. then load exceptions with `texexceptions.LoadExceptions`
-
