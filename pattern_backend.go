@@ -23,6 +23,7 @@ func (s patternTrieStats) FillRatio() float64 {
 type patternTrie interface {
 	EncodeKey(s string) ([]uint16, bool)
 	AllocPositionForWord(key []uint16) int
+	ResolvePosition(pos int) int
 	Freeze()
 	Iterator() patternIterator
 	Stats() patternTrieStats

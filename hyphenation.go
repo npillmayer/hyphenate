@@ -1,79 +1,39 @@
 package hyphenate
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 )
 
-func decodePatternLine(line string) (string, []int) {
-	var pattern string
-	var positions []int
-	var wasdigit bool
-	for _, char := range line {
-		if unicode.IsDigit(char) {
-			d, _ := strconv.Atoi(string(char))
-			positions = append(positions, d)
-			wasdigit = true
-		} else {
-			pattern = pattern + string(char)
-			if wasdigit {
-				wasdigit = false
-			} else {
-				positions = append(positions, 0)
-			}
-		}
-	}
-	return pattern, positions
+// Pattern is a format-agnostic hyphenation pattern representation.
+//
+// Sequence is the rune sequence to match (for example: ".ab", "für").
+// Weights stores Liang weights by relative position and may be longer than
+// Sequence by one entry when a pattern has a trailing weight digit.
+type Pattern struct {
+	Sequence []rune
+	Weights  []int
 }
 
-func maxPackedEntriesFromPatternData(data []byte) uint8 {
-	maxPacked := 0
-	inExceptions := false
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() {
-		line := scanner.Text()
-		if inExceptions {
-			if strings.HasPrefix(line, "}") {
-				inExceptions = false
-			}
-			continue
-		}
-		if strings.HasPrefix(line, "\\hyphenation{") {
-			inExceptions = true
-			continue
-		}
-		if strings.HasPrefix(line, "%") || strings.HasPrefix(line, "\\") ||
-			line == "" || strings.HasPrefix(line, "}") {
-			continue
-		}
-		_, positions := decodePatternLine(line)
-		nonzero := 0
-		for _, v := range positions {
-			if v != 0 {
-				nonzero++
-			}
-		}
-		if nonzero > maxPacked {
-			maxPacked = nonzero
-		}
-	}
-	if maxPacked > 16 {
-		maxPacked = 16
-	}
-	return uint8(maxPacked)
+// PatternReader yields compiled pattern entries one-by-one.
+// It should return io.EOF when the stream is exhausted.
+type PatternReader interface {
+	Next() (sequence []rune, weights []int, err error)
+}
+
+// ExceptionReader yields hyphenation exceptions one-by-one.
+// It should return io.EOF when the stream is exhausted.
+type ExceptionReader interface {
+	Next() (word string, positions []int, err error)
 }
 
 // Dictionary is a loaded hyphenation dictionary.
 //
 // A dictionary contains:
 //   - pattern rules (compiled into a pattern trie backend + compact metadata store)
-//   - explicit hyphenation exceptions from \hyphenation{...} blocks.
+//   - explicit hyphenation exceptions loaded through ExceptionReader.
 type Dictionary struct {
 	exceptions map[string][]int // e.g., "computer" => [3,5] = "com-pu-ter"
 	patterns   patternTrie
@@ -90,123 +50,94 @@ func (dict *Dictionary) PatternTrieStats() (backend string, usedSlots, totalSlot
 	return stats.Backend, stats.UsedSlots, stats.TotalSlots, stats.MaxStateID, stats.FillRatio()
 }
 
-// LoadPatterns parses TeX hyphenation data and returns a ready-to-use dictionary.
+// LoadPatternReader compiles patterns from a streaming, format-agnostic source.
 //
-// Patterns are enclosed in between
-//
-//	\patterns{ % some comment
-//	 ...
-//	.wil5i
-//	.ye4
-//	4ab.
-//	a5bal
-//	a5ban
-//	abe2
-//	 ...
-//	}
-//
-// Odd numbers stand for possible discretionary breakpoints, even numbers forbid
-// hyphenation. Digits belong to the character immediately after them, i.e.,
-//
-//	"a5ban" => (a)(5b)(a)(n) => positions["aban"] = [0,5,0,0].
-//
-// The loader uses a two-pass build:
-//  1. pre-pass to determine compact payload width for metadata packing
-//  2. trie build + freeze + metadata binding to final trie positions
-func LoadPatterns(name string, reader io.Reader) *Dictionary {
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		panic(fmt.Sprintf("cannot read pattern source %q: %v", name, err))
+// File format parsing is intentionally outside the base package. Use adapters
+// like package texpatterns to parse concrete formats and feed this API.
+func LoadPatternReader(name string, reader PatternReader) (*Dictionary, error) {
+	trie := mustNewDATBackend()
+	type pendingPayload struct {
+		pos    int
+		packed []byte
 	}
-	maxPacked := maxPackedEntriesFromPatternData(data)
-	patterns := mustNewDATBackend()
-	type pendingPattern struct {
-		key       []uint16
-		positions []int
-	}
-	var pending []pendingPattern
+	pending := make([]pendingPayload, 0, 1024)
+	maxPacked := 0
 	dict := &Dictionary{
 		exceptions: make(map[string][]int),
-		patterns:   patterns,
-		patternsV:  newPatternStore(maxPacked),
+		patterns:   trie,
 		Identifier: fmt.Sprintf("patterns: %s", name),
 	}
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	for scanner.Scan() { // internally, it advances token based on sperator
-		line := scanner.Text()
-		if strings.HasPrefix(line, "\\message{") { // extract patterns identifier
-			dict.Identifier = line[9 : len(line)-1]
-			//fmt.Println(dict.Identifier)
-		} else if strings.HasPrefix(line, "\\hyphenation{") {
-			dict.readExceptions(scanner)
-		} else if strings.HasPrefix(line, "%") || strings.HasPrefix(line, "\\") ||
-			line == "" || strings.HasPrefix(line, "}") {
-			// ignore comments, TeX commands, etc.
-		} else { // read and decode a pattern: ".ab1a" "abe4l3in", ...
-			pattern, positions := decodePatternLine(line)
-			//fmt.Printf("pattern '%s'\thas positions %v\n", pattern, positions)
-			key, ok := dict.patterns.EncodeKey(pattern)
-			if !ok {
-				continue
-			}
-			if dict.patterns.AllocPositionForWord(key) == 0 {
-				panic(fmt.Sprintf("could not allocate trie position for pattern %q", pattern))
-			}
-			pending = append(pending, pendingPattern{key: key, positions: positions})
+	for {
+		sequence, weights, err := reader.Next()
+		if err == io.EOF {
+			break
 		}
-	}
-	if err := scanner.Err(); err != nil {
-		panic(fmt.Sprintf("error scanning pattern source %q: %v", name, err))
+		if err != nil {
+			panic(fmt.Sprintf("cannot read patterns from %q: %v", name, err))
+		}
+		key, ok := dict.patterns.EncodeKey(string(sequence))
+		if !ok {
+			continue
+		}
+		pos := dict.patterns.AllocPositionForWord(key)
+		if pos == 0 {
+			panic(fmt.Sprintf("could not allocate trie position for pattern %q", string(sequence)))
+		}
+		packed, err := packPositions(weights)
+		if err != nil {
+			panic(fmt.Sprintf("cannot pack pattern metadata for %q: %v", string(sequence), err))
+		}
+		if len(packed) > maxPacked {
+			maxPacked = len(packed)
+		}
+		pending = append(pending, pendingPayload{pos: pos, packed: packed})
 	}
 	dict.patterns.Freeze()
+	dict.patternsV = newPatternStore(uint8(maxPacked))
 	for _, p := range pending {
-		patternID := dict.patterns.AllocPositionForWord(p.key)
+		patternID := dict.patterns.ResolvePosition(p.pos)
 		if patternID == 0 {
-			panic("could not resolve trie position after freeze")
+			panic(fmt.Sprintf("could not resolve trie position after freeze for temporary position %d", p.pos))
 		}
-		if err := dict.patternsV.Put(patternID, p.positions); err != nil {
+		if err := dict.patternsV.PutPacked(patternID, p.packed); err != nil {
 			panic(fmt.Sprintf("cannot store pattern metadata at %d: %v", patternID, err))
 		}
 	}
 	backend, used, total, maxStateID, fill := dict.PatternTrieStats()
 	tracer().Infof("pattern trie stats backend=%s used=%d total=%d fill=%.2f maxStateID=%d",
 		backend, used, total, fill, maxStateID)
-	return dict
+	return dict, nil
 }
 
-// readExceptions reads exceptions from a pattern file. Exceptions are denoted as
-//
-//	ex-cep-tion
-//	ta-ble
-//
-// and so on, a single word per line. Exceptions are enclosed in
-//
-//	\hyphenation{ % some comment
-//	 ...
-//	}
-func (dict *Dictionary) readExceptions(scanner *bufio.Scanner) {
-	for scanner.Scan() {
-		line := scanner.Text()
-		if strings.HasPrefix(line, "}") {
+// LoadExceptionReader loads exception entries from a streaming source.
+func (dict *Dictionary) LoadExceptionReader(reader ExceptionReader) {
+	for {
+		word, positions, err := reader.Next()
+		if err == io.EOF {
 			return
 		}
-		var positions []int // we'll extract positions
-		washyphen := false
-		for _, char := range line {
-			if char == '-' {
-				positions = append(positions, 1) // possible break point
-				washyphen = true
-			} else if washyphen { // skip letter
-				washyphen = false
-			} else { // a letter without a '-'
-				positions = append(positions, 0) // append 0
-			}
+		if err != nil {
+			panic(fmt.Sprintf("error scanning exception source: %v", err))
 		}
-		//word := strings.Replace(line, "-", "", -1)
-		word := strings.ReplaceAll(line, "-", "")
-		dict.exceptions[word] = positions
-		//fmt.Printf("exception '%s'\thas positions %v\n", line, positions)
+		dict.AddException(word, positions)
 	}
+}
+
+// LoadExceptionList loads explicit exception entries from an in-memory map.
+func (dict *Dictionary) LoadExceptionList(exceptions map[string][]int) {
+	for word, positions := range exceptions {
+		dict.AddException(word, positions)
+	}
+}
+
+// AddException registers one explicit hyphenation exception.
+func (dict *Dictionary) AddException(word string, positions []int) {
+	if dict.exceptions == nil {
+		dict.exceptions = make(map[string][]int)
+	}
+	pp := make([]int, len(positions))
+	copy(pp, positions)
+	dict.exceptions[word] = pp
 }
 
 // HyphenationString returns word with discretionary hyphens inserted.

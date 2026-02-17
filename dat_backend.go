@@ -18,6 +18,7 @@ type datBackend struct {
 	frozen      bool
 	root        *datBuildNode
 	nextNodeID  int
+	tmpToState  []uint32
 	runeToDense map[rune]uint16
 	nextDenseID uint16
 	compiled    *dat.DAT
@@ -117,7 +118,9 @@ func (db *datBackend) Freeze() {
 	db.compiled.Sigma = db.nextDenseID
 	db.compiled.Base = make([]int32, int(db.compiled.Root)+1)
 	db.compiled.Check = make([]int32, int(db.compiled.Root)+1)
+	db.tmpToState = make([]uint32, db.nextNodeID)
 	db.root.state = db.compiled.Root
+	db.tmpToState[db.root.tmpID] = db.compiled.Root
 	queue := []*datBuildNode{db.root}
 	for q := 0; q < len(queue); q++ {
 		n := queue[q]
@@ -133,6 +136,7 @@ func (db *datBackend) Freeze() {
 			ensureDATIndex(db.compiled, t)
 			child := n.children[label]
 			child.state = uint32(t)
+			db.tmpToState[child.tmpID] = child.state
 			db.compiled.Check[t] = int32(n.state)
 			queue = append(queue, child)
 		}
@@ -141,6 +145,19 @@ func (db *datBackend) Freeze() {
 	db.root = nil
 	db.runeToDense = nil
 	db.frozen = true
+}
+
+func (db *datBackend) ResolvePosition(pos int) int {
+	if pos <= 0 {
+		return 0
+	}
+	if !db.frozen {
+		return pos
+	}
+	if pos >= len(db.tmpToState) {
+		return 0
+	}
+	return int(db.tmpToState[pos])
 }
 
 func (db *datBackend) Iterator() patternIterator {

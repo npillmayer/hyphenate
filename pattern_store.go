@@ -9,8 +9,25 @@ const initialPatternStoreSlots = 2 // include slot 0 + root slot
 // Each non-zero vector entry is stored as one byte: high nibble=index, low nibble=value.
 type patternStore struct {
 	width   uint8
-	length  []uint8
-	payload []byte
+	length  []uint8 // will grow with demand
+	payload []byte  // will grow with demand
+}
+
+func packPositions(positions []int) ([]byte, error) {
+	packed := make([]byte, 0, len(positions))
+	for rel, val := range positions {
+		if val == 0 {
+			continue
+		}
+		if rel > 15 {
+			return nil, fmt.Errorf("relative index out of range (0..15): %d", rel)
+		}
+		if val < 0 || val > 15 {
+			return nil, fmt.Errorf("value out of range (0..15): %d", val)
+		}
+		packed = append(packed, byte((rel<<4)|val))
+	}
+	return packed, nil
 }
 
 func newPatternStore(maxPackedEntries uint8) *patternStore {
@@ -48,18 +65,17 @@ func (s *patternStore) Put(pos int, positions []int) error {
 	if pos < 0 {
 		return fmt.Errorf("negative trie position: %d", pos)
 	}
-	packed := make([]byte, 0, len(positions))
-	for rel, val := range positions {
-		if val == 0 {
-			continue
-		}
-		if rel > 15 {
-			return fmt.Errorf("relative index out of range (0..15): %d", rel)
-		}
-		if val < 0 || val > 15 {
-			return fmt.Errorf("value out of range (0..15): %d", val)
-		}
-		packed = append(packed, byte((rel<<4)|val))
+	packed, err := packPositions(positions)
+	if err != nil {
+		return err
+	}
+	return s.PutPacked(pos, packed)
+}
+
+// PutPacked stores already-packed payload at trie position pos.
+func (s *patternStore) PutPacked(pos int, packed []byte) error {
+	if pos < 0 {
+		return fmt.Errorf("negative trie position: %d", pos)
 	}
 	if len(packed) > int(s.width) {
 		return fmt.Errorf("packed payload too large: %d", len(packed))

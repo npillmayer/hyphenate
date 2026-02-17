@@ -1,77 +1,131 @@
 # hyphenate
 
 `hyphenate` is a Go package for dictionary-based word hyphenation.
-It reads TeX hyphenation pattern files, compiles them into a compact DAT-backed
-lookup structure, and returns legal hyphenation split points for words.
+The base package compiles format-agnostic patterns and exceptions into a
+compact DAT-backed lookup structure.
 
 ## Purpose
 
 This package is intended for:
 
-- loading TeX hyphenation pattern dictionaries (`\patterns{...}` and `\hyphenation{...}`)
+- compiling hyphenation patterns from streaming sources
+- loading explicit hyphenation exceptions
 - computing hyphenation opportunities in words
-- doing this with compact memory usage for read-many workloads
+- keeping runtime memory compact for read-many workloads
 
-Internally, the package compiles pattern keys into a frozen double-array trie (DAT)
-with BMP-aware symbol mapping and stores pattern weights in a packed metadata store.
+## Base Package API (`github.com/npillmayer/hyphenate`)
 
-## Package API
+### `type Pattern`
 
-### `func LoadPatterns(name string, reader io.Reader) *Dictionary`
+Format-agnostic pattern entry:
 
-Parses and compiles a hyphenation dictionary from `reader`.
+- `Sequence []rune`
+- `Weights []int`
 
-- `name` is used for dictionary identification.
-- Returns a `*Dictionary` ready for lookup.
-- Exceptions from `\hyphenation{...}` are loaded and take precedence.
+### `type PatternReader`
 
-### `type Dictionary`
+Streaming interface for pattern sources:
 
-Loaded dictionary handle for hyphenation lookups.
+- `Next() (sequence []rune, weights []int, err error)`
 
-Exported field:
+### `type ExceptionReader`
 
-- `Identifier string`: dictionary identifier extracted from input (or fallback name)
+Streaming interface for exception sources:
+
+- `Next() (word string, positions []int, err error)`
+
+### `func LoadPatternReader(name string, reader PatternReader) (*Dictionary, error)`
+
+Compiles patterns from a streaming reader into a dictionary.
+
+### `func (dict *Dictionary) LoadExceptionReader(reader ExceptionReader)`
+
+Loads exceptions from a streaming reader.
+
+### `func (dict *Dictionary) LoadExceptionList(exceptions map[string][]int)`
+
+Loads exceptions from an in-memory map.
+
+### `func (dict *Dictionary) AddException(word string, positions []int)`
+
+Adds one explicit exception.
 
 ### `func (dict *Dictionary) Hyphenate(word string) []string`
 
 Returns `word` split at legal hyphenation positions.
 
-Example output: `["al", "go", "rithm"]`.
-
 ### `func (dict *Dictionary) HyphenationString(word string) string`
 
 Returns `word` with `-` inserted at legal hyphenation positions.
 
-Example output: `"al-go-rithm"`.
+## TeX Adapters
 
-## Example
+TeX parsing is intentionally outside the base package:
+
+- patterns: `github.com/npillmayer/hyphenate/texpatterns`
+- exceptions: `github.com/npillmayer/hyphenate/texexceptions`
+
+Use these adapters when loading TeX `\patterns{...}` and `\hyphenation{...}`
+files.
+
+## Example: Base API (Format-Agnostic)
 
 ```go
 package main
 
 import (
 	"fmt"
-	"os"
+	"io"
 
 	"github.com/npillmayer/hyphenate"
 )
 
+type emptyPatterns struct{}
+
+func (emptyPatterns) Next() ([]rune, []int, error) {
+	return nil, nil, io.EOF
+}
+
 func main() {
-	f, err := os.Open("testdata/hyph-en-us.tex")
+	dict, err := hyphenate.LoadPatternReader("empty", emptyPatterns{})
 	if err != nil {
 		panic(err)
 	}
-	defer f.Close()
+	dict.AddException("table", []int{0, 0, 1, 0, 0})
+	fmt.Println(dict.HyphenationString("table")) // ta-ble
+}
+```
 
-	dict := hyphenate.LoadPatterns("hyph-en-us.tex", f)
+## Example: TeX File Loading
+
+```go
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+
+	"github.com/npillmayer/hyphenate/texexceptions"
+	"github.com/npillmayer/hyphenate/texpatterns"
+)
+
+func main() {
+	data, err := os.ReadFile("testdata/hyph-en-us.tex")
+	if err != nil {
+		panic(err)
+	}
+	dict, err := texpatterns.LoadPatterns("hyph-en-us.tex", bytes.NewReader(data))
+	if err != nil {
+		panic(err)
+	}
+	texexceptions.LoadExceptions(dict, bytes.NewReader(data))
 
 	fmt.Println(dict.HyphenationString("algorithm")) // al-go-rithm
-	fmt.Println(dict.Hyphenate("concatenation"))     // [con cate na tion]
 }
 ```
 
 ## Notes
 
-- Pattern matching is Unicode-aware for BMP characters (e.g., `ä`, `ö`, `ü`, `ß`).
+- Pattern matching is Unicode-aware for BMP characters.
 - Exceptions are applied before pattern-based hyphenation.
