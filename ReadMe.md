@@ -1,7 +1,7 @@
 # hyphenate
 
 `hyphenate` is a Go package for dictionary-based word hyphenation.
-It reads TeX hyphenation pattern files, compiles them into a compact trie-backed
+It reads TeX hyphenation pattern files, compiles them into a compact DAT-backed
 lookup structure, and returns legal hyphenation split points for words.
 
 ## Purpose
@@ -12,8 +12,8 @@ This package is intended for:
 - computing hyphenation opportunities in words
 - doing this with compact memory usage for read-many workloads
 
-Internally, the package compiles pattern keys into a compact `TinyHashTrie` and
-stores pattern weights in a packed metadata store.
+Internally, the package compiles pattern keys into a frozen double-array trie (DAT)
+with BMP-aware symbol mapping and stores pattern weights in a packed metadata store.
 
 ## Package API
 
@@ -73,5 +73,5 @@ func main() {
 
 ## Notes
 
-- The current pattern key encoder handles `.` and lowercase ASCII `a-z` pattern keys.
+- Pattern matching is Unicode-aware for BMP characters (e.g., `ä`, `ö`, `ü`, `ß`).
 - Exceptions are applied before pattern-based hyphenation.

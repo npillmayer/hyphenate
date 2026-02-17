@@ -5,15 +5,12 @@ Package hyphenation is a quick and dirty implementation of a hyphenation algorit
 
 Package for an algorithm to hyphenate words. It is based on an algorithm
 described by Frank Liang (F.M.Liang http://www.tug.org/docs/liang/). It loads
-a pattern file (available with the TeX distribution) and builds a trie
-structure, carrying an array of positions at every 'leaf'.
+a pattern file (available with the TeX distribution) and builds a frozen
+double-array trie (DAT) index. Hyphenation weight vectors are stored separately
+in a compact payload store and referenced by trie state IDs.
 
-The trie package I'm using here is a very naive implementation and should
-be replaced by a more sophisticated one
-(e.g., https://github.com/siongui/go-succinct-data-structure-trie).
-Resulting from the API of the trie, the implementation of the pattern
-application algorithm is bad. TODO: improve time complexity of pattern
-application.
+The lookup path is Unicode-aware for BMP characters and supports non-ASCII
+patterns such as German umlauts.
 
 Further Reading
 

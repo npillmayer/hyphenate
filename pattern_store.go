@@ -3,6 +3,7 @@ package hyphenate
 import "fmt"
 
 const absentPayload = 0xFF
+const initialPatternStoreSlots = 2 // include slot 0 + root slot
 
 // patternStore keeps packed hyphenation vectors directly indexed by trie position.
 // Each non-zero vector entry is stored as one byte: high nibble=index, low nibble=value.
@@ -18,8 +19,8 @@ func newPatternStore(maxPackedEntries uint8) *patternStore {
 	}
 	s := &patternStore{
 		width:   maxPackedEntries,
-		length:  make([]uint8, tinyTrieSize+1),
-		payload: make([]byte, (tinyTrieSize+1)*int(maxPackedEntries)),
+		length:  make([]uint8, initialPatternStoreSlots),
+		payload: make([]byte, initialPatternStoreSlots*int(maxPackedEntries)),
 	}
 	for i := range s.length {
 		s.length[i] = absentPayload

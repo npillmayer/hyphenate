@@ -8,30 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
-
-	compacttrie "github.com/npillmayer/hyphenate/trie"
+	"unicode/utf8"
 )
-
-const (
-	tinyTrieSize        = 15017 // must be prime
-	tinyTrieCategoryCnt = 27    // dot + lowercase latin letters
-)
-
-func encodeTrieKey(s string) ([]byte, bool) {
-	key := make([]byte, 0, len(s))
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		switch {
-		case c == '.':
-			key = append(key, 1)
-		case c >= 'a' && c <= 'z':
-			key = append(key, c-'a'+2)
-		default:
-			return nil, false
-		}
-	}
-	return key, true
-}
 
 func decodePatternLine(line string) (string, []int) {
 	var pattern string
@@ -94,13 +72,22 @@ func maxPackedEntriesFromPatternData(data []byte) uint8 {
 // Dictionary is a loaded hyphenation dictionary.
 //
 // A dictionary contains:
-//   - pattern rules (compiled into a TinyHashTrie + compact metadata store)
+//   - pattern rules (compiled into a pattern trie backend + compact metadata store)
 //   - explicit hyphenation exceptions from \hyphenation{...} blocks.
 type Dictionary struct {
 	exceptions map[string][]int // e.g., "computer" => [3,5] = "com-pu-ter"
-	patterns   *compacttrie.TinyHashTrie
+	patterns   patternTrie
 	patternsV  *patternStore // compact metadata vectors by pattern id
 	Identifier string        // Identifies the dictionary
+}
+
+// PatternTrieStats reports density metrics for the underlying pattern trie.
+func (dict *Dictionary) PatternTrieStats() (backend string, usedSlots, totalSlots, maxStateID int, fillRatio float64) {
+	if dict == nil || dict.patterns == nil {
+		return "", 0, 0, 0, 0
+	}
+	stats := dict.patterns.Stats()
+	return stats.Backend, stats.UsedSlots, stats.TotalSlots, stats.MaxStateID, stats.FillRatio()
 }
 
 // LoadPatterns parses TeX hyphenation data and returns a ready-to-use dictionary.
@@ -132,12 +119,9 @@ func LoadPatterns(name string, reader io.Reader) *Dictionary {
 		panic(fmt.Sprintf("cannot read pattern source %q: %v", name, err))
 	}
 	maxPacked := maxPackedEntriesFromPatternData(data)
-	patterns, err := compacttrie.NewTinyHashTrie(tinyTrieSize, tinyTrieCategoryCnt)
-	if err != nil {
-		panic(fmt.Sprintf("cannot initialize tiny trie: %v", err))
-	}
+	patterns := mustNewDATBackend()
 	type pendingPattern struct {
-		key       []byte
+		key       []uint16
 		positions []int
 	}
 	var pending []pendingPattern
@@ -161,7 +145,7 @@ func LoadPatterns(name string, reader io.Reader) *Dictionary {
 		} else { // read and decode a pattern: ".ab1a" "abe4l3in", ...
 			pattern, positions := decodePatternLine(line)
 			//fmt.Printf("pattern '%s'\thas positions %v\n", pattern, positions)
-			key, ok := encodeTrieKey(pattern)
+			key, ok := dict.patterns.EncodeKey(pattern)
 			if !ok {
 				continue
 			}
@@ -184,6 +168,9 @@ func LoadPatterns(name string, reader io.Reader) *Dictionary {
 			panic(fmt.Sprintf("cannot store pattern metadata at %d: %v", patternID, err))
 		}
 	}
+	backend, used, total, maxStateID, fill := dict.PatternTrieStats()
+	tracer().Infof("pattern trie stats backend=%s used=%d total=%d fill=%.2f maxStateID=%d",
+		backend, used, total, fill, maxStateID)
 	return dict
 }
 
@@ -247,21 +234,21 @@ func (dict *Dictionary) Hyphenate(word string) []string {
 	if positions, found := dict.exceptions[word]; found {
 		return splitAtPositions(word, positions)
 	}
-	dottedword := "." + word + "."
-	var positions = make([]int, 10) // the resulting hyphenation positions
-	l := len(dottedword)
-	for i := range l { // "word", "ord", "rd", "d"
-		positions = mergePrefixPositions(dottedword[i:l], dict.patterns, dict.patternsV, i, positions)
+	wordRunes := []rune(word)
+	dottedword := make([]rune, 0, len(wordRunes)+2)
+	dottedword = append(dottedword, '.')
+	dottedword = append(dottedword, wordRunes...)
+	dottedword = append(dottedword, '.')
+	positions := make([]int, len(dottedword)) // the resulting hyphenation positions
+	for i := range len(dottedword) {          // "word", "ord", "rd", "d"
+		positions = mergePrefixPositions(string(dottedword[i:]), dict.patterns, dict.patternsV, i, positions)
 	}
 	positions = positions[1 : len(positions)-1]
 	for i := 0; i < leftMin && i < len(positions); i++ {
 		positions[i] = 0 // disallow breaks too close to the left edge
 	}
-	rightCutoff := len(word) - rightMin + 1 // indices >= cutoff leave fewer than rightMin chars
+	rightCutoff := len(wordRunes) - rightMin + 1 // indices >= cutoff leave fewer than rightMin chars
 	rightCutoff = max(0, rightCutoff)
-	// if rightCutoff < 0 {
-	// 	rightCutoff = 0
-	// }
 	for i := rightCutoff; i < len(positions); i++ {
 		positions[i] = 0 // disallow breaks too close to the right edge
 	}
@@ -270,16 +257,16 @@ func (dict *Dictionary) Hyphenate(word string) []string {
 
 // mergePrefixPositions looks up all prefixes of a fragment and merges matching
 // pattern weights into positions at absolute offset at.
-func mergePrefixPositions(wordfragment string, tr *compacttrie.TinyHashTrie, store *patternStore, at int,
+func mergePrefixPositions(wordfragment string, tr patternTrie, store *patternStore, at int,
 	positions []int) []int {
 	//
-	key, ok := encodeTrieKey(wordfragment)
+	key, ok := tr.EncodeKey(wordfragment)
 	if !ok {
 		return positions
 	}
 	it := tr.Iterator()
 	for _, c := range key {
-		patternID := it.Next(int8(c))
+		patternID := it.Next(c)
 		if patternID == 0 {
 			break
 		}
@@ -290,14 +277,29 @@ func mergePrefixPositions(wordfragment string, tr *compacttrie.TinyHashTrie, sto
 
 // Helper: split a string at positions given by an integer slice.
 func splitAtPositions(word string, positions []int) []string {
-	var pp = make([]string, 0, len(word)/3)
+	offsets := runeByteOffsets(word)
+	runeCount := len(offsets) - 1
+	var pp = make([]string, 0, max(1, runeCount/3))
 	prev := 0                       // holds the last split index
 	for i, pos := range positions { // check every position
+		if i <= 0 || i >= runeCount {
+			continue
+		}
 		if pos > 0 && pos%2 != 0 { // if position is odd > 0
-			pp = append(pp, word[prev:i]) // append syllable
-			prev = i                      // remember last split index
+			split := offsets[i]
+			pp = append(pp, word[prev:split]) // append syllable
+			prev = split                      // remember last split index
 		}
 	}
 	pp = append(pp, word[prev:]) // append last syllable
 	return pp
+}
+
+func runeByteOffsets(s string) []int {
+	offsets := make([]int, 0, utf8.RuneCountInString(s)+1)
+	for i := range s {
+		offsets = append(offsets, i)
+	}
+	offsets = append(offsets, len(s))
+	return offsets
 }
