@@ -54,7 +54,7 @@ func (dict *Dictionary) PatternTrieStats() (backend string, usedSlots, totalSlot
 //
 // File format parsing is intentionally outside the base package. Use adapters
 // like package texpatterns to parse concrete formats and feed this API.
-func LoadPatterns(name string, reader PatternReader) (*Dictionary, error) {
+func LoadPatterns(name string, reader PatternReader) (dict *Dictionary, err error) {
 	trie := mustNewDATBackend()
 	type pendingPayload struct {
 		pos    int
@@ -62,30 +62,34 @@ func LoadPatterns(name string, reader PatternReader) (*Dictionary, error) {
 	}
 	pending := make([]pendingPayload, 0, 1024)
 	maxPacked := 0
-	dict := &Dictionary{
+	dict = &Dictionary{
 		exceptions: make(map[string][]int),
 		patterns:   trie,
 		Identifier: fmt.Sprintf("patterns: %s", name),
 	}
+	var sequence []rune
+	var weights []int
 	for {
-		sequence, weights, err := reader.Next()
+		sequence, weights, err = reader.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			panic(fmt.Sprintf("cannot read patterns from %q: %v", name, err))
+			return
 		}
 		key, ok := dict.patterns.EncodeKey(string(sequence))
 		if !ok {
-			continue
+			continue // simply skip invalid patterns
 		}
 		pos := dict.patterns.AllocPositionForWord(key)
 		if pos == 0 {
-			panic(fmt.Sprintf("could not allocate trie position for pattern %q", string(sequence)))
+			err = fmt.Errorf("could not allocate trie position for pattern %q", string(sequence))
+			return
 		}
-		packed, err := packPositions(weights)
+		var packed []byte
+		packed, err = packPositions(weights)
 		if err != nil {
-			panic(fmt.Sprintf("cannot pack pattern metadata for %q: %v", string(sequence), err))
+			return
 		}
 		if len(packed) > maxPacked {
 			maxPacked = len(packed)
@@ -97,10 +101,11 @@ func LoadPatterns(name string, reader PatternReader) (*Dictionary, error) {
 	for _, p := range pending {
 		patternID := dict.patterns.ResolvePosition(p.pos)
 		if patternID == 0 {
-			panic(fmt.Sprintf("could not resolve trie position after freeze for temporary position %d", p.pos))
+			err = fmt.Errorf("could not resolve trie position after freeze for temporary position %d", p.pos)
+			return
 		}
-		if err := dict.patternsV.PutPacked(patternID, p.packed); err != nil {
-			panic(fmt.Sprintf("cannot store pattern metadata at %d: %v", patternID, err))
+		if err = dict.patternsV.PutPacked(patternID, p.packed); err != nil {
+			return
 		}
 	}
 	backend, used, total, maxStateID, fill := dict.PatternTrieStats()
